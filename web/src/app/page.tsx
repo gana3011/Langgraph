@@ -1,19 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-
-type Message = { role: "user" | "assistant"; content: string };
-
-type Interrupt =
-  | { type: "questions"; questions: string[] }
-  | {
-      type: "approval";
-      symptoms: string[];
-      red_flags: string[];
-      urgency: string;
-      reasoning: string;
-      response: string;
-    };
+import { Message, Interrupt } from "../types";
+import { Header } from "../components/Header";
+import { ChatInput } from "../components/ChatInput";
+import { MessageList } from "../components/MessageList";
+import { ApprovalPanel } from "../components/ApprovalPanel";
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -34,7 +26,6 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, interrupt, loading]);
 
-  // After loading finishes, refocus the input
   useEffect(() => {
     if (!loading && interrupt?.type !== "approval") {
       inputRef.current?.focus();
@@ -46,7 +37,6 @@ export default function Home() {
   };
 
   const handleApiResponse = (data: { state: any; interrupts: any[] }) => {
-    // Rebuild full message list from state
     const stateMessages: Message[] = (data.state.messages ?? []).map(
       (m: any) => ({
         role: m.type === "human" ? "user" : "assistant",
@@ -58,9 +48,9 @@ export default function Home() {
       const raw = data.interrupts[0];
 
       if ("questions" in raw) {
-        // Show questions as an agent message in the chat
-        const questionText =
-          raw.questions.map((q: string, i: number) => `${i + 1}. ${q}`).join("\n");
+        const questionText = raw.questions
+          .map((q: string, i: number) => `${i + 1}. ${q}`)
+          .join("\n");
         setMessages([
           ...stateMessages,
           { role: "assistant", content: questionText },
@@ -112,22 +102,18 @@ export default function Home() {
     }
   };
 
-  // Single submit handler — routes to correct resume or initial message
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
     if (!text || loading) return;
     setInput("");
 
-    // Add user bubble immediately
     setMessages((prev) => [...prev, { role: "user", content: text }]);
 
     if (interrupt?.type === "questions") {
-      // Resume the graph with the user's plain-string answer
       setInterrupt(null);
       await callApi({ resume: text });
     } else {
-      // Fresh message
       await callApi({ message: text });
     }
   };
@@ -143,132 +129,41 @@ export default function Home() {
   const inputDisabled = loading || interrupt?.type === "approval" || done;
 
   return (
-    <div className="page">
-      {/* Header */}
-      <header className="header">
-        <span className="header-icon">🏥</span>
-        <div>
-          <h1>Medical Triage Agent</h1>
-          <p>Describe your symptoms to get started</p>
-        </div>
-      </header>
+    <div className="flex flex-col w-full max-w-[700px] h-screen bg-white shadow-[0_0_40px_rgba(0,0,0,0.1)]">
+      <Header />
 
-      {/* Chat area */}
-      <main className="chat-area">
-        {messages.length === 0 && !loading && (
-          <div className="empty-state">
-            <p>👋 Hello! Tell me your symptoms and I'll help assess your situation.</p>
-          </div>
-        )}
+      <main className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+        <MessageList messages={messages} loading={loading} />
 
-        {messages.map((m, i) => (
-          <div key={i} className={`row ${m.role}`}>
-            <div className="avatar">{m.role === "user" ? "🧑" : "🤖"}</div>
-            <div className="bubble">
-              <span className="sender">{m.role === "user" ? "You" : "Agent"}</span>
-              <p>{m.content}</p>
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="row assistant">
-            <div className="avatar">🤖</div>
-            <div className="bubble">
-              <span className="sender">Agent</span>
-              <p className="typing">
-                <span /><span /><span />
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Human approval panel — shown inline in chat */}
         {!loading && interrupt?.type === "approval" && (
-          <div className="row assistant">
-            <div className="avatar">🩺</div>
-            <div className="approval-panel">
-              <h3>Human Review Required</h3>
-
-              <div className="info-grid">
-                <div>
-                  <strong>Symptoms</strong>
-                  <ul>
-                    {interrupt.symptoms.map((s, i) => <li key={i}>{s}</li>)}
-                  </ul>
-                </div>
-                <div>
-                  <strong>Red Flags</strong>
-                  <ul>
-                    {interrupt.red_flags.length === 0
-                      ? <li className="muted">None detected</li>
-                      : interrupt.red_flags.map((f, i) => <li key={i} className="danger">{f}</li>)
-                    }
-                  </ul>
-                </div>
-              </div>
-
-              <label>
-                Urgency
-                <select value={editUrgency} onChange={(e) => setEditUrgency(e.target.value)}>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </label>
-
-              <label>
-                Reasoning
-                <span className="reasoning">{interrupt.reasoning}</span>
-              </label>
-
-              <label>
-                Response to Patient
-                <textarea
-                  value={editResponse}
-                  onChange={(e) => setEditResponse(e.target.value)}
-                  rows={4}
-                />
-              </label>
-
-              <div className="approval-btns">
-                <button className="btn-approve" onClick={() => submitApproval(true)}>
-                  ✅ Approve
-                </button>
-                <button className="btn-edit" onClick={() => submitApproval(false)}>
-                  ✏️ Edit &amp; Continue
-                </button>
-              </div>
-            </div>
-          </div>
+          <ApprovalPanel
+            interrupt={interrupt}
+            editUrgency={editUrgency}
+            setEditUrgency={setEditUrgency}
+            editResponse={editResponse}
+            setEditResponse={setEditResponse}
+            submitApproval={submitApproval}
+          />
         )}
 
         {done && !interrupt && (
-          <p className="done-badge">✓ Triage complete</p>
+          <p className="text-center text-[0.82rem] font-semibold text-green-600 p-1">
+            ✓ Triage complete
+          </p>
         )}
 
         <div ref={bottomRef} />
       </main>
 
-      {/* Single input bar */}
-      <form className="input-bar" onSubmit={handleSubmit}>
-        <input
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={
-            done
-              ? "Triage complete."
-              : interrupt?.type === "questions"
-              ? "Type your answer..."
-              : "Describe your symptoms..."
-          }
-          disabled={inputDisabled}
-        />
-        <button type="submit" disabled={inputDisabled || !input.trim()}>
-          Send
-        </button>
-      </form>
+      <ChatInput
+        input={input}
+        setInput={setInput}
+        onSubmit={handleSubmit}
+        disabled={inputDisabled}
+        done={done}
+        isQuestionMode={interrupt?.type === "questions"}
+        inputRef={inputRef}
+      />
     </div>
   );
 }
